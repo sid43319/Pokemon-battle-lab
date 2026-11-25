@@ -28,13 +28,13 @@ target_link_libraries(battle_cli PRIVATE engine project_options)
 include(CTest)
 if(BUILD_TESTING)
     include(FetchContent)
-    FetchContent_Declare(googletest
-        URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.zip
-    )
     # Use extraction timestamps with newer CMake versions.
     if(POLICY CMP0135)
         cmake_policy(SET CMP0135 NEW)
     endif()
+    FetchContent_Declare(googletest
+        URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.zip
+    )
     FetchContent_MakeAvailable(googletest)
 
     add_executable(engine_tests tests/engine_test.cpp)
