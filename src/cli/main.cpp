@@ -37,7 +37,7 @@ int chooseMove(const Pokemon& pokemon) {
             }
             std::cout << "That move number is out of range.\n";
         }
-        return moveNumber -1;
+        return moveNumber - 1;
 }
 
 
@@ -46,8 +46,10 @@ int main() {
     charmander.attack = 20;
     charmander.currentHp = 50;
     charmander.defense = 20;
+    charmander.specialAttack = 25;
+    charmander.specialDefense = 30;
     charmander.maxHp = 50;
-    charmander.moves = {{"Flamethrower", 30}, {"Scratch", 20}};
+    charmander.moves = {{"Flamethrower", 30, 100, MoveCategory::Special}, {"Scratch", 20, 100, MoveCategory::Physical}};
     charmander.name = "Charmander";
     charmander.speed = 30;
 
@@ -55,8 +57,10 @@ int main() {
     squirtle.attack = 25;
     squirtle.currentHp = 50;
     squirtle.defense = 15;
+    squirtle.specialAttack = 30;
+    squirtle.specialDefense = 30;
     squirtle.maxHp = 50;
-    squirtle.moves = {{"Water Gun", 35}, {"Tackle", 20}};
+    squirtle.moves = {{"Water Gun", 35, 95, MoveCategory::Special}, {"Tackle", 20}, {"Quick Strike", 15, 100, MoveCategory::Physical, 1}};
     squirtle.name = "Squirtle";
     squirtle.speed = 20;
 
@@ -65,12 +69,32 @@ int main() {
 
     while (!battle.isOver()) {
         std::cout << "Turn Count: " << battle.turnNumber << std::endl;
+
+        //call chooseMove to allow user input to select the pokemon's moves
         int moveIndex = chooseMove(battle.first);
         if (moveIndex == -1) {
             return 0;
         }
         Move moveChoice = battle.first.moves[moveIndex];
-        performTurn(battle.first, battle.second, moveChoice, battle.second.moves[0]);
+
+        //randomly select opponent's move
+        int opponentMoveIndex = chooseRandomMove(battle.second, battle.rng);
+        if (opponentMoveIndex == -1) {
+            return 0;
+        }
+        Move moveRandom = battle.second.moves[opponentMoveIndex];
+
+        std::vector<AttackResult> turn = performTurn(battle.first, battle.second, moveChoice, moveRandom, battle.rng);
+
+        //print out relevant info related to attack during each turn
+        for (AttackResult a: turn) {
+            if (a.hit == false) {
+                std::cout << a.attackerName << " used " << a.moveName << ", but missed!" << std::endl;
+            } else {
+                std::cout << a.attackerName << " used " << a.moveName << ", dealing " << a.damage << " damage." << std::endl;
+            }
+        }
+
         std::cout << battle.first.name << ": " << battle.first.currentHp << "HP" << std::endl;
         std::cout << battle.second.name << ": " << battle.second.currentHp << "HP" << std::endl;
         battle.turnNumber++;

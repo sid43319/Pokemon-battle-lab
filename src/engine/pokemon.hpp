@@ -12,6 +12,8 @@ struct Pokemon {
     int attack = 0;
     int defense = 0;
     int speed = 0;
+    int specialAttack = 0;
+    int specialDefense = 0;
 
 
     //damagetaken func
