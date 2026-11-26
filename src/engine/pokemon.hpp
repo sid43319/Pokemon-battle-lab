@@ -2,7 +2,7 @@
 #include <string>
 #include <engine/move.hpp>
 #include <vector>
-
+#include <engine/type.hpp>
 //defined pokemon struct
 struct Pokemon {
     std::string name;
@@ -14,6 +14,7 @@ struct Pokemon {
     int speed = 0;
     int specialAttack = 0;
     int specialDefense = 0;
+    Type type = Type::Normal;
 
 
     //damagetaken func

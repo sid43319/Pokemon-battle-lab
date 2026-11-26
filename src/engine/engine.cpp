@@ -97,11 +97,22 @@ int calculateDamage(const Pokemon& attacker, const Pokemon& defender, const Move
 
     int total = (attack * movePower) / defense;
 
-    if (total <= 1) {
-        total = 1;
+
+    //checks the effectiveness of move based on move and defender type matchups
+    double effectiveness = typeEffectiveness(move.type, defender.type);
+    
+    //calculate Same-type attack bonus, equals 1.5 if the move is same type as attacker
+    double STAB = move.type == attacker.type ? 1.5 : 1.0;
+
+    double finalDamage = total * effectiveness * STAB;
+
+    int damage = (int) finalDamage;
+
+    if (damage <= 1) {
+        damage = 1;
     }
 
-    return total;
+    return damage;
 
 }
 
@@ -113,4 +124,68 @@ int chooseRandomMove(const Pokemon& pokemon, std::mt19937& rng) {
     std::uniform_int_distribution<int> dist(0, pokemon.moves.size() - 1);
     return dist(rng);
 
+}
+
+double typeEffectiveness(Type moveType, Type defenderType) {
+    if (moveType == Type::Normal) {
+        return 1.0;
+    } else if (moveType == Type::Fire) {
+        if (defenderType == Type::Normal) {
+            return 1.0;
+        } else if (defenderType == Type::Fire || defenderType == Type::Water) {
+            return 0.5;
+        } else if (defenderType == Type::Grass) {
+            return 2.0;
+        }
+    } else if (moveType == Type::Water) {
+        if (defenderType == Type::Normal) {
+            return 1.0;
+        } else if (defenderType == Type::Water || defenderType == Type::Grass) {
+            return 0.5;
+        } else if (defenderType == Type::Fire) {
+            return 2.0;
+        }
+    } else if (moveType == Type::Grass) {
+        if (defenderType == Type::Normal) {
+            return 1.0;
+        } else if (defenderType == Type::Fire || defenderType == Type::Grass) {
+            return 0.5;
+        } else if (defenderType == Type::Water) {
+            return 2.0;
+        }
+    }
+    return 1.0;
+}
+
+bool isValidAction(const Pokemon& pokemon, const Action& action) {
+    if (pokemon.isFainted()) {
+        return false;
+    } else if (action.moveIndex < 0) {
+        return false;
+    } else if (static_cast<std::size_t>(action.moveIndex) >= pokemon.moves.size()) {
+        return false;
+    }
+    return true;
+}
+
+TurnResult resolveTurn(BattleState& battle, const Action& firstAction, const Action& secondAction) {
+    if(battle.isOver()) {
+        return {TurnStatus::BattleOver, {}};
+    }
+
+    //validate actions
+    if (!isValidAction(battle.first, firstAction)) {
+        return {TurnStatus::InvalidFirstAction, {}};
+    }
+
+    if (!isValidAction(battle.second, secondAction)) {
+        return {TurnStatus::InvalidSecondAction, {}};
+    }
+
+    Move first = battle.first.moves[firstAction.moveIndex];
+    Move second = battle.second.moves[secondAction.moveIndex];
+
+    std::vector<AttackResult> turn = performTurn(battle.first, battle.second, first, second, battle.rng);
+    battle.turnNumber++;
+    return {TurnStatus::Resolved, turn};
 }

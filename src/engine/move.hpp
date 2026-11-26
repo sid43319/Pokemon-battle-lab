@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <engine/type.hpp>
 
 enum class MoveCategory {
     Physical,
@@ -14,4 +15,5 @@ struct Move {
     int accuracy = 100;
     MoveCategory category = MoveCategory::Physical;
     int priority = 0;
+    Type type = Type::Normal;
 };

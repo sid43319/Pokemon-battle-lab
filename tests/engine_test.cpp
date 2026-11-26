@@ -2,13 +2,153 @@
 #include "engine/pokemon.hpp"
 #include "engine/battle.hpp"
 #include <random>
+
+TEST(Battle, ValidActionsResolveTurnAndAdvanceCounter) {
+    Pokemon first;
+    first.type = Type::Fire;
+    first.maxHp = first.currentHp = 100;
+    first.attack = first.defense = 20;
+    first.speed = 30;
+    first.moves = {{"Tackle", 20}, {"Heavy Hit", 30}};
+    Pokemon second = first;
+    second.speed = 20;
+    BattleState battle{first, second};
+
+    const auto results = resolveTurn(battle, Action{0}, Action{0});
+
+    EXPECT_EQ(results.status, TurnStatus::Resolved);
+    ASSERT_EQ(results.attacks.size(), 2u);
+    EXPECT_EQ(battle.first.currentHp, 80);
+    EXPECT_EQ(battle.second.currentHp, 80);
+    EXPECT_EQ(battle.turnNumber, 2);
+
+    // Index 1 must select the second move rather than always using index 0.
+    const auto nextResults = resolveTurn(battle, Action{1}, Action{0});
+    EXPECT_EQ(nextResults.status, TurnStatus::Resolved);
+    ASSERT_EQ(nextResults.attacks.size(), 2u);
+    EXPECT_EQ(nextResults.attacks[0].moveName, "Heavy Hit");
+    EXPECT_EQ(battle.first.currentHp, 60);
+    EXPECT_EQ(battle.second.currentHp, 50);
+    EXPECT_EQ(battle.turnNumber, 3);
+}
+
+TEST(Battle, InvalidActionsLeaveHealthTurnAndRandomnessUnchanged) {
+    Pokemon pokemon;
+    pokemon.type = Type::Fire;
+    pokemon.maxHp = pokemon.currentHp = 100;
+    pokemon.attack = pokemon.defense = 20;
+    pokemon.speed = 30;
+    pokemon.moves = {{"Tackle", 20}};
+    const BattleState initial{pokemon, pokemon};
+    const Action choices[][2] = {
+        {Action{0}, Action{1}},
+        {Action{-1}, Action{0}},
+        {Action{1}, Action{0}},
+        {Action{0}, Action{-1}}
+    };
+
+    for (const auto& actions : choices) {
+        BattleState battle = initial;
+        const auto results = resolveTurn(battle, actions[0], actions[1]);
+
+        const auto expectedStatus = actions[0].moveIndex == 0
+            ? TurnStatus::InvalidSecondAction : TurnStatus::InvalidFirstAction;
+        EXPECT_EQ(results.status, expectedStatus);
+        EXPECT_TRUE(results.attacks.empty());
+        EXPECT_EQ(battle.first.currentHp, initial.first.currentHp);
+        EXPECT_EQ(battle.second.currentHp, initial.second.currentHp);
+        EXPECT_EQ(battle.turnNumber, initial.turnNumber);
+        EXPECT_TRUE(battle.rng == initial.rng);
+    }
+}
+
+TEST(Battle, KnockoutResolvesNormallyAndFurtherTurnsAreRejected) {
+    Pokemon first;
+    first.type = Type::Fire;
+    first.maxHp = first.currentHp = 50;
+    first.attack = first.defense = 20;
+    first.speed = 30;
+    first.moves = {{"Tackle", 70}};
+    Pokemon second = first;
+    second.speed = 20;
+    BattleState battle{first, second};
+
+    const auto knockout = resolveTurn(battle, Action{0}, Action{0});
+    EXPECT_EQ(knockout.status, TurnStatus::Resolved);
+    ASSERT_EQ(knockout.attacks.size(), 1u);
+    EXPECT_EQ(knockout.attacks[0].damage, 50);
+    EXPECT_TRUE(battle.isOver());
+    EXPECT_EQ(battle.turnNumber, 2);
+
+    const auto savedRng = battle.rng;
+    const auto afterBattle = resolveTurn(battle, Action{0}, Action{0});
+    EXPECT_EQ(afterBattle.status, TurnStatus::BattleOver);
+    EXPECT_TRUE(afterBattle.attacks.empty());
+    EXPECT_EQ(battle.first.currentHp, 50);
+    EXPECT_EQ(battle.second.currentHp, 0);
+    EXPECT_EQ(battle.turnNumber, 2);
+    EXPECT_TRUE(battle.rng == savedRng);
+}
+
 // This checks the test setup; battle-rule tests will come later.
+TEST(Battle, TypeEffectivenessMatchesSupportedMatchups) {
+    const Type types[] = {Type::Normal, Type::Fire, Type::Water, Type::Grass};
+    const double expected[4][4] = {
+        {1.0, 1.0, 1.0, 1.0},
+        {1.0, 0.5, 0.5, 2.0},
+        {1.0, 2.0, 0.5, 0.5},
+        {1.0, 0.5, 2.0, 0.5}
+    };
+    for (int move = 0; move < 4; ++move) {
+        for (int defender = 0; defender < 4; ++defender) {
+            EXPECT_DOUBLE_EQ(typeEffectiveness(types[move], types[defender]),
+                             expected[move][defender])
+                << "Move row " << move << ", defender column " << defender;
+        }
+    }
+}
+
+TEST(Battle, DamageCombinesEffectivenessAndSameTypeBonus) {
+    Pokemon attacker;
+    attacker.type = Type::Fire;
+    attacker.attack = 20;
+    Pokemon defender;
+    defender.type = Type::Grass;
+    defender.defense = 20;
+    Move move{"Fire Move", 30, 100, MoveCategory::Physical, 0, Type::Fire};
+
+    EXPECT_EQ(calculateDamage(attacker, defender, move), 90);
+    defender.type = Type::Water;
+    EXPECT_EQ(calculateDamage(attacker, defender, move), 22);
+    attacker.type = Type::Normal;
+    defender.type = Type::Grass;
+    EXPECT_EQ(calculateDamage(attacker, defender, move), 60);
+
+    // Normal moves also receive STAB from a Normal attacker.
+    move.type = Type::Normal;
+    EXPECT_EQ(calculateDamage(attacker, defender, move), 45);
+
+    // Clamp only after the modifiers, preserving zero for non-damaging inputs.
+    attacker.type = Type::Fire;
+    attacker.attack = 1;
+    move.type = Type::Fire;
+    move.power = 1;
+    defender.defense = 100;
+    EXPECT_EQ(calculateDamage(attacker, defender, move), 1);
+    move.power = 0;
+    EXPECT_EQ(calculateDamage(attacker, defender, move), 0);
+    move.power = 30;
+    attacker.attack = 0;
+    EXPECT_EQ(calculateDamage(attacker, defender, move), 0);
+}
+
 TEST(Setup, BasicAssertion) {
     EXPECT_EQ(2 + 2, 4);
 }
 
 TEST(Battle, SameSeedProducesSameMoveSequence) {
     Pokemon squirtle;
+    squirtle.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     squirtle.moves = {{"Water Gun", 35}, {"Tackle", 20}, {"Bite", 25}};
     std::mt19937 firstRng{42};
     std::mt19937 secondRng{42};
@@ -34,6 +174,7 @@ TEST(Battle, SameSeedProducesSameMoveSequence) {
 
 TEST(Battle, RandomMoveHandlesEmptyAndSingleMoveLists) {
     Pokemon squirtle;
+    squirtle.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     std::mt19937 rng{42};
     EXPECT_EQ(chooseRandomMove(squirtle, rng), -1);
 
@@ -44,10 +185,12 @@ TEST(Battle, RandomMoveHandlesEmptyAndSingleMoveLists) {
 
 TEST(Battle, GuaranteedAccuracyOutcomesDoNotConsumeRandomness) {
     Pokemon attacker;
+    attacker.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     attacker.name = "Squirtle";
     attacker.currentHp = 50;
     attacker.attack = 20;
     Pokemon defender;
+    defender.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     defender.currentHp = 50;
     defender.defense = 20;
     std::mt19937 rng{42};
@@ -77,9 +220,11 @@ TEST(Battle, GuaranteedAccuracyOutcomesDoNotConsumeRandomness) {
 
 TEST(Battle, PartialAccuracyIsRepeatableAndUsesTheRoll) {
     Pokemon attacker;
+    attacker.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     attacker.currentHp = 50;
     attacker.attack = 20;
     Pokemon firstDefender;
+    firstDefender.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     firstDefender.defense = 20;
     Pokemon secondDefender = firstDefender;
     const Move move{"Water Gun", 30, 50};
@@ -110,6 +255,7 @@ TEST(Battle, PartialAccuracyIsRepeatableAndUsesTheRoll) {
 
 TEST(Battle, MissStillAllowsOpponentToAttack) {
     Pokemon first;
+    first.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     first.currentHp = 50;
     first.attack = first.defense = 20;
     first.speed = 30;
@@ -130,6 +276,7 @@ TEST(Battle, MissStillAllowsOpponentToAttack) {
 
 TEST(Pokemon, StoresHealth) {
     Pokemon pikachu;
+    pikachu.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     pikachu.maxHp = 100;
     pikachu.currentHp = 65;
 
@@ -139,6 +286,7 @@ TEST(Pokemon, StoresHealth) {
 
 TEST(Pokemon, TakingDamageReducesHealth) {
     Pokemon pikachu;
+    pikachu.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     pikachu.maxHp = 100;
     pikachu.currentHp = 65;
 
@@ -150,6 +298,7 @@ TEST(Pokemon, TakingDamageReducesHealth) {
 
 TEST(Pokemon, TakingNegativeDamageDoesNothing) {
     Pokemon pikachu;
+    pikachu.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     pikachu.maxHp = 100;
     pikachu.currentHp = 65;
 
@@ -161,6 +310,7 @@ TEST(Pokemon, TakingNegativeDamageDoesNothing) {
 
 TEST(Pokemon, TakingDamageGreaterThanCurrHpEqualsZero) {
     Pokemon pikachu;
+    pikachu.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     pikachu.maxHp = 100;
     pikachu.currentHp = 65;
 
@@ -172,6 +322,7 @@ TEST(Pokemon, TakingDamageGreaterThanCurrHpEqualsZero) {
 
 TEST(Pokemon, PokemonFainted) {
     Pokemon pikachu;
+    pikachu.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     pikachu.maxHp = 100;
     pikachu.currentHp = 0;
 
@@ -180,6 +331,7 @@ TEST(Pokemon, PokemonFainted) {
 
 TEST(Pokemon, PokemonNotFainted) {
     Pokemon pikachu;
+    pikachu.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     pikachu.maxHp = 100;
     pikachu.currentHp = 1;
 
@@ -188,11 +340,13 @@ TEST(Pokemon, PokemonNotFainted) {
 
 TEST(Pokemon, TakingAttackReducesDefenderHp) {
     Pokemon pikachu;
+    pikachu.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     pikachu.maxHp = 100;
     pikachu.currentHp = 65;
     pikachu.attack = 20;
     pikachu.defense = 20;
     Pokemon squirtle;
+    squirtle.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     squirtle.maxHp = 60;
     squirtle.currentHp = 50;
     squirtle.moves = {{"Water Gun", 35}};
@@ -208,11 +362,13 @@ TEST(Pokemon, TakingAttackReducesDefenderHp) {
 
 TEST(Pokemon, FaintedAttackerDoesNoDamage) {
     Pokemon pikachu;
+    pikachu.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     pikachu.maxHp = 100;
     pikachu.currentHp = 65;
     pikachu.attack = 20;
     pikachu.defense = 20;
     Pokemon squirtle;
+    squirtle.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     squirtle.maxHp = 60;
     squirtle.currentHp = 0;
     squirtle.moves = {{"Water Gun", 35}};
@@ -228,6 +384,7 @@ TEST(Pokemon, FaintedAttackerDoesNoDamage) {
 
 TEST(Pokemon, SpeedDeterminesOrder) {
     Pokemon pikachu;
+    pikachu.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     pikachu.maxHp = 100;
     pikachu.currentHp = 65;
     pikachu.speed = 30;
@@ -235,6 +392,7 @@ TEST(Pokemon, SpeedDeterminesOrder) {
     pikachu.attack = 20;
     pikachu.defense = 20;
     Pokemon squirtle;
+    squirtle.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     squirtle.maxHp = 60;
     squirtle.currentHp = 50;
     squirtle.moves = {{"Water Gun", 70}};
@@ -255,6 +413,7 @@ TEST(Pokemon, SpeedDeterminesOrder) {
 
 TEST(Pokemon, DiffSpeedsBothAttack) {
     Pokemon pikachu;
+    pikachu.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     pikachu.maxHp = 100;
     pikachu.currentHp = 65;
     pikachu.speed = 30;
@@ -262,6 +421,7 @@ TEST(Pokemon, DiffSpeedsBothAttack) {
     pikachu.attack = 20;
     pikachu.defense = 20;
     Pokemon squirtle;
+    squirtle.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     squirtle.maxHp = 60;
     squirtle.currentHp = 50;
     squirtle.moves = {{"Water Gun", 30}};
@@ -283,6 +443,7 @@ TEST(Pokemon, DiffSpeedsBothAttack) {
 
 TEST(Battle, SpeedTieKnockoutPreventsCounterattack) {
     Pokemon first;
+    first.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     first.maxHp = first.currentHp = 50;
     first.attack = first.defense = 20;
     first.speed = 30;
@@ -308,9 +469,11 @@ TEST(Battle, SpeedTieKnockoutPreventsCounterattack) {
 
 TEST(Pokemon, AttackWithDefenseAndOffense) {
     Pokemon pikachu;
+    pikachu.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     pikachu.moves = {{"Thunder Shock", 30}};
     pikachu.attack = 20;
     Pokemon squirtle;
+    squirtle.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     squirtle.defense = 20;
 
     // Equal Attack and Defense leave damage equal to move power.
@@ -328,6 +491,7 @@ TEST(Pokemon, AttackWithDefenseAndOffense) {
 
 TEST(Battle, HigherPriorityOverridesSpeedAndPreventsCounterattack) {
     Pokemon faster;
+    faster.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     faster.name = "Charmander";
     faster.maxHp = faster.currentHp = 50;
     faster.attack = faster.defense = 20;
@@ -361,9 +525,11 @@ TEST(Battle, HigherPriorityOverridesSpeedAndPreventsCounterattack) {
 
 TEST(Battle, MoveCategorySelectsPhysicalOrSpecialStats) {
     Pokemon attacker;
+    attacker.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     attacker.attack = 20;
     attacker.specialAttack = 40;
     Pokemon defender;
+    defender.type = Type::Fire; // Keep Normal test moves neutral and without STAB.
     defender.defense = 20;
     defender.specialDefense = 10;
     const Move physical{"Scratch", 30, 100, MoveCategory::Physical};
